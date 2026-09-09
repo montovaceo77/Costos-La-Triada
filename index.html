@@ -119,7 +119,8 @@
     border: none; background: transparent; padding: 4px 0;
   }
   .recipe-meta { display: flex; gap: 20px; margin-bottom: 18px; }
-  form.grid5 { display: grid; grid-template-columns: 1.6fr 1fr 1fr 0.9fr 1.2fr auto; gap: 10px; align-items: end; margin-bottom: 0; }
+  form.grid-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 10px; }
+  form.grid-row2 { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
   form.grid-line { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
   .actions { display: flex; gap: 6px; justify-content: flex-end; }
   .loading { padding: 3rem 1rem; text-align: center; color: var(--ink-soft); }
@@ -212,7 +213,7 @@ async function loadAll() {
 }
 
 function normalizeInsumo(r) {
-  return { id: String(r.ID), name: r.NOMBRE || '', category: r.CATEGORIA || 'Otros', qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g', price: Number(r.PRECIO) || 0 };
+  return { id: String(r.ID), name: r.NOMBRE || '', category: r.CATEGORIA || 'Otros', provider: r.PROVEEDOR || '', qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g', price: Number(r.PRECIO) || 0 };
 }
 function normalizeReceta(r) {
   return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0 };
@@ -258,19 +259,24 @@ function renderInsumos() {
     <div class="card">
       <div class="card-head"><h2 class="serif">${insumoEditingId ? 'Editar insumo' : 'Registrar compra'}</h2></div>
       <div class="card-body">
-        <form id="insumo-form" class="grid5">
-          <div class="field"><label>Insumo</label><input id="f-name" placeholder="Mayonesa" /></div>
-          <div class="field"><label>Categoría</label>
-            <select id="f-category">${CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+        <form id="insumo-form">
+          <div class="grid-row">
+            <div class="field"><label>Insumo</label><input id="f-name" placeholder="Mayonesa" /></div>
+            <div class="field"><label>Categoría</label>
+              <select id="f-category">${CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Proveedor (opcional)</label><input id="f-provider" placeholder="Makro" /></div>
           </div>
-          <div class="field"><label>Cantidad</label><input id="f-qty" type="number" min="0" step="any" placeholder="1000" /></div>
-          <div class="field"><label>Unidad</label>
-            <select id="f-unit">${Object.entries(UNIT_INFO).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('')}</select>
-          </div>
-          <div class="field"><label>Precio pagado</label><input id="f-price" type="number" min="0" step="any" placeholder="10000" /></div>
-          <div class="actions">
-            <button type="submit" class="btn btn-primary">${insumoEditingId ? '✓' : '+'}</button>
-            ${insumoEditingId ? '<button type="button" id="f-cancel" class="btn btn-ghost">✕</button>' : ''}
+          <div class="grid-row2">
+            <div class="field"><label>Cantidad</label><input id="f-qty" type="number" min="0" step="any" placeholder="1000" /></div>
+            <div class="field"><label>Unidad</label>
+              <select id="f-unit">${Object.entries(UNIT_INFO).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Precio pagado</label><input id="f-price" type="number" min="0" step="any" placeholder="10000" /></div>
+            <div class="actions">
+              <button type="submit" class="btn btn-primary">${insumoEditingId ? '✓' : '+'}</button>
+              ${insumoEditingId ? '<button type="button" id="f-cancel" class="btn btn-ghost">✕</button>' : ''}
+            </div>
           </div>
         </form>
         <div id="insumo-error"></div>
@@ -281,10 +287,10 @@ function renderInsumos() {
       <div class="card-head"><h2 class="serif">Insumos comprados (${state.insumos.length})</h2></div>
       ${state.insumos.length === 0 ? '<div class="empty">Aún no registras compras. Agrega tu primer insumo arriba.</div>' : `
         <table>
-          <thead><tr><th>Insumo</th><th class="right">Cantidad comprada</th><th class="right">Precio total</th><th class="right">Costo por unidad</th><th class="right"></th></tr></thead>
+          <thead><tr><th>Insumo</th><th>Proveedor</th><th class="right">Cantidad comprada</th><th class="right">Precio total</th><th class="right">Costo por unidad</th><th class="right"></th></tr></thead>
           <tbody>
             ${cats.map(cat => `
-              <tr><td colspan="5" style="padding:10px 16px 6px; border-bottom:none;">
+              <tr><td colspan="6" style="padding:10px 16px 6px; border-bottom:none;">
                 <span class="cat-row" style="padding:0"><span class="cat-dot" style="background:${CATEGORY_COLORS[cat]}"></span><span class="cat-label">${cat}</span></span>
               </td></tr>
               ${state.insumos.filter(i => (i.category||'Otros') === cat).map(ing => {
@@ -293,6 +299,7 @@ function renderInsumos() {
                 const disabled = usedInRecipes(ing.id);
                 return `<tr>
                   <td>${esc(ing.name)}</td>
+                  <td>${ing.provider ? esc(ing.provider) : '<span style="color:var(--ink-faint)">—</span>'}</td>
                   <td class="right">${ing.qty} ${info.label}</td>
                   <td class="right">${COP(ing.price)}</td>
                   <td class="right strong">${COP2(cost)} / ${info.base}</td>
@@ -314,6 +321,7 @@ function renderInsumos() {
     if (ing) {
       el.querySelector('#f-name').value = ing.name;
       el.querySelector('#f-category').value = ing.category;
+      el.querySelector('#f-provider').value = ing.provider || '';
       el.querySelector('#f-qty').value = ing.qty;
       el.querySelector('#f-unit').value = ing.unit;
       el.querySelector('#f-price').value = ing.price;
@@ -331,6 +339,7 @@ async function onInsumoSubmit(e) {
   e.preventDefault();
   const name = document.getElementById('f-name').value.trim();
   const category = document.getElementById('f-category').value;
+  const provider = document.getElementById('f-provider').value.trim();
   const qty = document.getElementById('f-qty').value;
   const unit = document.getElementById('f-unit').value;
   const price = document.getElementById('f-price').value;
@@ -343,14 +352,14 @@ async function onInsumoSubmit(e) {
 
   try {
     if (insumoEditingId) {
-      const payload = { ID: insumoEditingId, NOMBRE: name, CATEGORIA: category, CANTIDAD: Number(qty), UNIDAD: unit, PRECIO: Number(price) };
+      const payload = { ID: insumoEditingId, NOMBRE: name, CATEGORIA: category, PROVEEDOR: provider, CANTIDAD: Number(qty), UNIDAD: unit, PRECIO: Number(price) };
       await apiPost('updateInsumo', payload);
       const idx = state.insumos.findIndex(i => i.id === insumoEditingId);
       state.insumos[idx] = normalizeInsumo(payload);
       insumoEditingId = null;
     } else {
       const id = uid();
-      const payload = { ID: id, NOMBRE: name, CATEGORIA: category, CANTIDAD: Number(qty), UNIDAD: unit, PRECIO: Number(price) };
+      const payload = { ID: id, NOMBRE: name, CATEGORIA: category, PROVEEDOR: provider, CANTIDAD: Number(qty), UNIDAD: unit, PRECIO: Number(price) };
       await apiPost('addInsumo', payload);
       state.insumos.push(normalizeInsumo(payload));
     }
