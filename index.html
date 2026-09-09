@@ -161,10 +161,10 @@ const UNIT_INFO = {
   unidad: { base: 'unidad', factor: 1,    label: 'unidad', group: 'unidad' },
 };
 const UNITS_BY_GROUP = { masa: ['g','kg'], volumen: ['ml','l'], unidad: ['unidad'] };
-const CATEGORIES = ['Proteína','Panes','Vegetales','Salsas y aderezos','Quesos','Empaque','Otros'];
+const CATEGORIES = ['Proteína','Panes','Vegetales','Salsas y aderezos','Sales y condimentos','Quesos','Empaque','Otros'];
 const CATEGORY_COLORS = {
   'Proteína': '#9C7A3F', 'Panes': '#C89B3C', 'Vegetales': '#5C6B4F',
-  'Salsas y aderezos': '#A8461F', 'Quesos': '#B08B3F', 'Empaque': '#6B6255', 'Otros': '#8A8478',
+  'Salsas y aderezos': '#A8461F', 'Sales y condimentos': '#7C6F52', 'Quesos': '#B08B3F', 'Empaque': '#6B6255', 'Otros': '#8A8478',
 };
 
 const state = { insumos: [], recetas: [], recetaItems: [], laborRate: Number(localStorage.getItem('triada-labor-rate')) || 15000, selectedRecetaId: null, tab: 'insumos' };
@@ -279,27 +279,33 @@ function renderInsumos() {
 
     <div class="card">
       <div class="card-head"><h2 class="serif">Insumos comprados (${state.insumos.length})</h2></div>
-      ${state.insumos.length === 0 ? '<div class="empty">Aún no registras compras. Agrega tu primer insumo arriba.</div>' :
-        cats.map(cat => `
-          <div class="cat-row"><span class="cat-dot" style="background:${CATEGORY_COLORS[cat]}"></span><span class="cat-label">${cat}</span></div>
-          <table><tbody>
-            ${state.insumos.filter(i => (i.category||'Otros') === cat).map(ing => {
-              const info = UNIT_INFO[ing.unit];
-              const cost = unitCostOf(ing);
-              const disabled = usedInRecipes(ing.id);
-              return `<tr>
-                <td>${esc(ing.name)}</td>
-                <td class="right">${ing.qty} ${info.label}</td>
-                <td class="right">${COP(ing.price)}</td>
-                <td class="right strong">${COP2(cost)} / ${info.base}</td>
-                <td class="right"><div class="actions">
-                  <button class="icon-btn edit-insumo" data-id="${ing.id}" title="Editar">✎</button>
-                  <button class="icon-btn danger delete-insumo" data-id="${ing.id}" title="Eliminar" ${disabled ? 'disabled' : ''}>🗑</button>
-                </div></td>
-              </tr>`;
-            }).join('')}
-          </tbody></table>
-        `).join('')}
+      ${state.insumos.length === 0 ? '<div class="empty">Aún no registras compras. Agrega tu primer insumo arriba.</div>' : `
+        <table>
+          <thead><tr><th>Insumo</th><th class="right">Cantidad comprada</th><th class="right">Precio total</th><th class="right">Costo por unidad</th><th class="right"></th></tr></thead>
+          <tbody>
+            ${cats.map(cat => `
+              <tr><td colspan="5" style="padding:10px 16px 6px; border-bottom:none;">
+                <span class="cat-row" style="padding:0"><span class="cat-dot" style="background:${CATEGORY_COLORS[cat]}"></span><span class="cat-label">${cat}</span></span>
+              </td></tr>
+              ${state.insumos.filter(i => (i.category||'Otros') === cat).map(ing => {
+                const info = UNIT_INFO[ing.unit];
+                const cost = unitCostOf(ing);
+                const disabled = usedInRecipes(ing.id);
+                return `<tr>
+                  <td>${esc(ing.name)}</td>
+                  <td class="right">${ing.qty} ${info.label}</td>
+                  <td class="right">${COP(ing.price)}</td>
+                  <td class="right strong">${COP2(cost)} / ${info.base}</td>
+                  <td class="right"><div class="actions">
+                    <button class="icon-btn edit-insumo" data-id="${ing.id}" title="Editar">✎</button>
+                    <button class="icon-btn danger delete-insumo" data-id="${ing.id}" title="Eliminar" ${disabled ? 'disabled' : ''}>🗑</button>
+                  </div></td>
+                </tr>`;
+              }).join('')}
+            `).join('')}
+          </tbody>
+        </table>
+      `}
     </div>
   `;
 
