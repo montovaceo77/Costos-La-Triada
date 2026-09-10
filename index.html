@@ -153,6 +153,7 @@
 
 <script>
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx86VwZM5O32YIMYvoYVRyp0YG1xc_YW7G4_FeVAhYRyqVpZoMfRop7sumb_aV0dZGK/exec";
+const SHEET_ID = "1yxMk37qubRNcaj-lDlC7PWnF7l97IH2o2tAOD5DVfzg";
 
 const UNIT_INFO = {
   g:      { base: 'g',      factor: 1,    label: 'g',  group: 'masa' },
@@ -175,11 +176,25 @@ const COP2 = (n) => isFinite(n) ? new Intl.NumberFormat('es-CO', { style:'curren
 const uid = () => Math.random().toString(36).slice(2, 10);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-async function apiGet() {
-  const res = await fetch(APPS_SCRIPT_URL, { method: 'GET' });
-  if (!res.ok) throw new Error('No se pudo leer el Sheet');
-  return res.json();
+async function gvizFetch(sheetName) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  const match = text.match(/setResponse\(([\s\S]*)\);?\s*$/);
+  if (!match) throw new Error('El Sheet no es público o cambió de estructura (' + sheetName + ')');
+  const json = JSON.parse(match[1]);
+  const cols = json.table.cols.map(c => (c.label || '').trim());
+  return (json.table.rows || []).map(row => {
+    const obj = {};
+    cols.forEach((label, i) => {
+      if (!label) return;
+      const cell = row.c[i];
+      obj[label] = cell && cell.v !== null && cell.v !== undefined ? cell.v : '';
+    });
+    return obj;
+  }).filter(obj => Object.values(obj).some(v => v !== ''));
 }
+
 async function apiPost(action, payload) {
   const res = await fetch(APPS_SCRIPT_URL, {
     method: 'POST',
@@ -199,16 +214,18 @@ function clearBanner() { document.getElementById('banner-slot').innerHTML = ''; 
 
 async function loadAll() {
   try {
-    const data = await apiGet();
-    state.insumos = (data.insumos || []).map(normalizeInsumo);
-    state.recetas = (data.recetas || []).map(normalizeReceta);
-    state.recetaItems = (data.recetaItems || []).map(normalizeItem);
+    const [insumos, recetas, recetaItems] = await Promise.all([
+      gvizFetch('INSUMOS'), gvizFetch('RECETAS'), gvizFetch('RECETAITEMS'),
+    ]);
+    state.insumos = insumos.map(normalizeInsumo);
+    state.recetas = recetas.map(normalizeReceta);
+    state.recetaItems = recetaItems.map(normalizeItem);
     if (!state.selectedRecetaId && state.recetas.length) state.selectedRecetaId = state.recetas[0].id;
     document.getElementById('loading').style.display = 'none';
     ['insumos','recetas','resumen'].forEach(t => document.getElementById('tab-'+t).style.display = t === state.tab ? 'block' : 'none');
     render();
   } catch (e) {
-    document.getElementById('loading').textContent = 'No se pudo conectar con el Sheet. Revisa la URL del Apps Script o vuelve a intentar.';
+    document.getElementById('loading').textContent = 'No se pudo conectar con el Sheet. Revisa que esté compartido como "Cualquiera con el enlace" y vuelve a intentar.';
   }
 }
 
