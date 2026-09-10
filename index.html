@@ -229,6 +229,18 @@ function unitCostOf(ing) {
   return ing.price / baseQty;
 }
 
+// Converts a used quantity (in `unit`) into the ingredient's own base unit (g, ml or unidad).
+// Mass and volume are treated as equivalent 1:1 (1 ml = 1 g) so you can buy in liters and
+// use by weight, or vice versa. "unidad" only converts to "unidad".
+function convertToBaseQty(ing, qty, unit) {
+  const usedInfo = UNIT_INFO[unit];
+  const ingGroup = UNIT_INFO[ing.unit].group;
+  if (usedInfo.group === 'unidad' || ingGroup === 'unidad') {
+    return usedInfo.group === ingGroup ? qty * usedInfo.factor : null;
+  }
+  return qty * usedInfo.factor;
+}
+
 /* ---------------- NAV ---------------- */
 
 document.querySelectorAll('nav button').forEach(btn => {
@@ -439,16 +451,19 @@ function renderRecipeEditor(recipe) {
   const host = document.getElementById('recipe-editor');
   const items = state.recetaItems.filter(it => it.recetaId === recipe.id);
   const cats = CATEGORIES.filter(c => state.insumos.some(i => (i.category||'Otros') === c));
-  const firstIng = state.insumos[0];
   const lineUnits = (ingId) => {
     const ing = state.insumos.find(i => i.id === ingId);
-    return ing ? UNITS_BY_GROUP[UNIT_INFO[ing.unit].group] : ['g'];
+    if (!ing) return ['g'];
+    const group = UNIT_INFO[ing.unit].group;
+    return group === 'unidad' ? ['unidad'] : ['g', 'kg', 'ml', 'l'];
   };
 
   const lineCost = (item) => {
     const ing = state.insumos.find(i => i.id === item.ingredientId);
     if (!ing) return 0;
-    return unitCostOf(ing) * item.qty * UNIT_INFO[item.unit].factor;
+    const baseQty = convertToBaseQty(ing, item.qty, item.unit);
+    if (baseQty === null) return 0;
+    return unitCostOf(ing) * baseQty;
   };
   const ingredientCost = items.reduce((s, it) => s + lineCost(it), 0);
   const laborCost = (recipe.laborMinutes / 60) * state.laborRate;
@@ -532,6 +547,10 @@ async function addLine(recipe, ingredientId, qty, unit) {
   errEl.innerHTML = '';
   if (!ingredientId) return errEl.innerHTML = '<p class="error-text">Elige un insumo.</p>';
   if (!qty || Number(qty) <= 0) return errEl.innerHTML = '<p class="error-text">La cantidad usada debe ser mayor a 0.</p>';
+  const ing = state.insumos.find(i => i.id === ingredientId);
+  if (ing && convertToBaseQty(ing, Number(qty), unit) === null) {
+    return errEl.innerHTML = `<p class="error-text">"${esc(ing.name)}" se compra por unidad — solo puedes usarlo en la receta en unidades, no en peso ni volumen.</p>`;
+  }
   const id = uid();
   const payload = { ID: id, RECETAID: recipe.id, INGREDIENTEID: ingredientId, CANTIDAD: Number(qty), UNIDAD: unit };
   try {
@@ -571,7 +590,7 @@ function renderResumen() {
     const ingredientCost = items.reduce((s, it) => {
       const ing = state.insumos.find(i => i.id === it.ingredientId);
       if (!ing) return s;
-      return s + unitCostOf(ing) * it.qty * UNIT_INFO[it.unit].factor;
+      return s + unitCostOf(ing) * (convertToBaseQty(ing, it.qty, it.unit) || 0);
     }, 0);
     const laborCost = (r.laborMinutes / 60) * state.laborRate;
     const total = ingredientCost + laborCost;
