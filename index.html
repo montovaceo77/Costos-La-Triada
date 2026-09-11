@@ -96,8 +96,8 @@
   .cat-row { display: flex; align-items: center; gap: 8px; padding: 10px 16px 6px; }
   .cat-dot { width: 8px; height: 8px; border-radius: 50%; }
   .cat-label { font-size: 12px; font-weight: 500; color: var(--ink-soft); }
-  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .metrics.three { grid-template-columns: repeat(3, 1fr); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .metrics.three { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .metric { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
   .metric.accent { background: var(--accent-bg); border-color: var(--accent-border); }
   .metric .label { font-size: 11.5px; color: var(--ink-soft); margin-bottom: 4px; }
@@ -233,7 +233,7 @@ function normalizeInsumo(r) {
   return { id: String(r.ID), name: r.NOMBRE || '', category: r.CATEGORIA || 'Otros', provider: r.PROVEEDOR || '', qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g', price: Number(r.PRECIO) || 0 };
 }
 function normalizeReceta(r) {
-  return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0 };
+  return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0, yieldGrams: Number(r.RENDIMIENTO) || 0, steps: r.PASOS || '' };
 }
 function normalizeItem(r) {
   return { id: String(r.ID), recetaId: String(r.RECETAID), ingredientId: String(r.INGREDIENTEID), qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g' };
@@ -443,7 +443,7 @@ function renderRecetas() {
 
 async function createReceta() {
   const id = uid();
-  const payload = { ID: id, NOMBRE: `Receta ${state.recetas.length + 1}`, PORCIONES: 1, MINUTOS: 0 };
+  const payload = { ID: id, NOMBRE: `Receta ${state.recetas.length + 1}`, PORCIONES: 1, MINUTOS: 0, RENDIMIENTO: 0, PASOS: '' };
   try {
     await apiPost('addReceta', payload);
     state.recetas.push(normalizeReceta(payload));
@@ -458,7 +458,7 @@ function scheduleRecetaSave(receta) {
   clearTimeout(recetaSaveTimer);
   recetaSaveTimer = setTimeout(async () => {
     try {
-      await apiPost('updateReceta', { ID: receta.id, NOMBRE: receta.name, PORCIONES: receta.servings, MINUTOS: receta.laborMinutes });
+      await apiPost('updateReceta', { ID: receta.id, NOMBRE: receta.name, PORCIONES: receta.servings, MINUTOS: receta.laborMinutes, RENDIMIENTO: receta.yieldGrams, PASOS: receta.steps });
       clearBanner();
     } catch (err) { showBanner('No se pudo guardar la receta: ' + err.message); }
   }, 500);
@@ -493,8 +493,9 @@ function renderRecipeEditor(recipe) {
       <button class="icon-btn danger" id="r-delete" title="Eliminar receta">🗑</button>
     </div>
     <div class="recipe-meta">
-      <div class="field"><label>Porciones que rinde</label><input id="r-servings" type="number" min="1" step="1" value="${recipe.servings}" style="width:90px" /></div>
+      <div class="field"><label>Rendimiento total (g)</label><input id="r-yield" type="number" min="0" step="any" value="${recipe.yieldGrams || ''}" placeholder="1000" style="width:110px" /></div>
       <div class="field"><label>Tiempo invertido (minutos)</label><input id="r-minutes" type="number" min="0" step="any" value="${recipe.laborMinutes}" style="width:110px" /></div>
+      <div class="field"><label>Porciones (opcional)</label><input id="r-servings" type="number" min="1" step="1" value="${recipe.servings}" style="width:90px" /></div>
     </div>
 
     <div class="card">
@@ -528,10 +529,18 @@ function renderRecipeEditor(recipe) {
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-head"><h2 class="serif">Pasos de preparación</h2></div>
+      <div class="card-body compact">
+        <textarea id="r-steps" placeholder="1. Pica la cebolla...&#10;2. Mezcla con..." style="width:100%; min-height:110px; border:1px solid var(--input-border); border-radius:6px; padding:10px; font-family:inherit; font-size:13.5px; background:var(--input-bg); color:var(--ink); resize:vertical;">${esc(recipe.steps || '')}</textarea>
+      </div>
+    </div>
+
     <div class="metrics">
       <div class="metric"><div class="label">Costo ingredientes</div><div class="value">${COP(ingredientCost)}</div></div>
       <div class="metric"><div class="label">Costo mano de obra</div><div class="value">${COP(laborCost)}</div><div class="sub">${recipe.laborMinutes} min · ${COP(state.laborRate)}/h</div></div>
       <div class="metric accent"><div class="label">Costo total</div><div class="value">${COP(total)}</div></div>
+      <div class="metric accent"><div class="label">Costo por gramo</div><div class="value">${recipe.yieldGrams > 0 ? COP2(total/recipe.yieldGrams) : '—'}</div>${recipe.yieldGrams > 0 ? '' : '<div class="sub">Ingresa el rendimiento en g</div>'}</div>
       <div class="metric"><div class="label">Costo por porción</div><div class="value">${COP(total/servings)}</div></div>
     </div>
   `;
@@ -546,8 +555,10 @@ function renderRecipeEditor(recipe) {
   refreshUnits();
 
   host.querySelector('#r-name').addEventListener('input', (e) => { recipe.name = e.target.value; scheduleRecetaSave(recipe); });
+  host.querySelector('#r-yield').addEventListener('input', (e) => { recipe.yieldGrams = Number(e.target.value)||0; scheduleRecetaSave(recipe); refreshMetricsSoon(recipe); });
   host.querySelector('#r-servings').addEventListener('input', (e) => { recipe.servings = Number(e.target.value)||1; scheduleRecetaSave(recipe); refreshMetricsSoon(recipe); });
   host.querySelector('#r-minutes').addEventListener('input', (e) => { recipe.laborMinutes = Number(e.target.value)||0; scheduleRecetaSave(recipe); refreshMetricsSoon(recipe); });
+  host.querySelector('#r-steps').addEventListener('input', (e) => { recipe.steps = e.target.value; scheduleRecetaSave(recipe); });
   host.querySelector('#r-delete').addEventListener('click', () => deleteReceta(recipe.id));
   host.querySelector('#line-form').addEventListener('submit', (e) => { e.preventDefault(); addLine(recipe, ingSelect.value, host.querySelector('#l-qty').value, unitSelect.value); });
   host.querySelectorAll('.delete-line').forEach(b => b.addEventListener('click', () => deleteLine(b.dataset.id, recipe)));
@@ -611,7 +622,7 @@ function renderResumen() {
     }, 0);
     const laborCost = (r.laborMinutes / 60) * state.laborRate;
     const total = ingredientCost + laborCost;
-    return { name: r.name, ingredientCost, laborCost, total, perServing: total / (r.servings || 1) };
+    return { name: r.name, ingredientCost, laborCost, total, perServing: total / (r.servings || 1), perGram: r.yieldGrams > 0 ? total / r.yieldGrams : null };
   });
   const promedio = rows.length ? rows.reduce((s,r) => s + r.total, 0) / rows.length : 0;
 
@@ -634,12 +645,13 @@ function renderResumen() {
       <div class="card-head"><h2 class="serif">Costo por receta</h2></div>
       ${rows.length === 0 ? '<div class="empty">Crea recetas en la pestaña Recetas para verlas aquí.</div>' : `
         <table>
-          <thead><tr><th>Receta</th><th class="right">Ingredientes</th><th class="right">Mano de obra</th><th class="right">Total</th><th class="right">Por porción</th></tr></thead>
+          <thead><tr><th>Receta</th><th class="right">Ingredientes</th><th class="right">Mano de obra</th><th class="right">Total</th><th class="right">Por gramo</th><th class="right">Por porción</th></tr></thead>
           <tbody>${rows.map(r => `<tr>
             <td>${esc(r.name)}</td>
             <td class="right">${COP(r.ingredientCost)}</td>
             <td class="right">${COP(r.laborCost)}</td>
             <td class="right strong">${COP(r.total)}</td>
+            <td class="right">${r.perGram !== null ? COP2(r.perGram) : '—'}</td>
             <td class="right">${COP(r.perServing)}</td>
           </tr>`).join('')}</tbody>
         </table>
