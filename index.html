@@ -483,6 +483,12 @@ function renderRecipeEditor(recipe) {
     return unitCostOf(ing) * baseQty;
   };
   const ingredientCost = items.reduce((s, it) => s + lineCost(it), 0);
+  const autoYieldGrams = items.reduce((s, it) => {
+    const ing = state.insumos.find(i => i.id === it.ingredientId);
+    if (!ing || UNIT_INFO[ing.unit].group === 'unidad') return s;
+    return s + (convertToBaseQty(ing, it.qty, it.unit) || 0);
+  }, 0);
+  const effectiveYield = recipe.yieldGrams > 0 ? recipe.yieldGrams : autoYieldGrams;
   const laborCost = (recipe.laborMinutes / 60) * state.laborRate;
   const total = ingredientCost + laborCost;
   const servings = recipe.servings || 1;
@@ -493,7 +499,11 @@ function renderRecipeEditor(recipe) {
       <button class="icon-btn danger" id="r-delete" title="Eliminar receta">🗑</button>
     </div>
     <div class="recipe-meta">
-      <div class="field"><label>Rendimiento total (g)</label><input id="r-yield" type="number" min="0" step="any" value="${recipe.yieldGrams || ''}" placeholder="1000" style="width:110px" /></div>
+      <div class="field">
+        <label>Rendimiento total (g)</label>
+        <input id="r-yield" type="number" min="0" step="any" value="${recipe.yieldGrams || ''}" placeholder="${autoYieldGrams > 0 ? autoYieldGrams.toFixed(0) : '1000'}" style="width:130px" />
+        <span style="font-size:11px;color:var(--ink-faint)">${recipe.yieldGrams > 0 ? 'Manual' : 'Automático'} · suma ingredientes: ${autoYieldGrams.toFixed(0)} g</span>
+      </div>
       <div class="field"><label>Tiempo invertido (minutos)</label><input id="r-minutes" type="number" min="0" step="any" value="${recipe.laborMinutes}" style="width:110px" /></div>
       <div class="field"><label>Porciones (opcional)</label><input id="r-servings" type="number" min="1" step="1" value="${recipe.servings}" style="width:90px" /></div>
     </div>
@@ -540,7 +550,7 @@ function renderRecipeEditor(recipe) {
       <div class="metric"><div class="label">Costo ingredientes</div><div class="value">${COP(ingredientCost)}</div></div>
       <div class="metric"><div class="label">Costo mano de obra</div><div class="value">${COP(laborCost)}</div><div class="sub">${recipe.laborMinutes} min · ${COP(state.laborRate)}/h</div></div>
       <div class="metric accent"><div class="label">Costo total</div><div class="value">${COP(total)}</div></div>
-      <div class="metric accent"><div class="label">Costo por gramo</div><div class="value">${recipe.yieldGrams > 0 ? COP2(total/recipe.yieldGrams) : '—'}</div>${recipe.yieldGrams > 0 ? '' : '<div class="sub">Ingresa el rendimiento en g</div>'}</div>
+      <div class="metric accent"><div class="label">Costo por gramo</div><div class="value">${effectiveYield > 0 ? COP2(total/effectiveYield) : '—'}</div>${effectiveYield > 0 ? '' : '<div class="sub">Agrega ingredientes o un rendimiento</div>'}</div>
       <div class="metric"><div class="label">Costo por porción</div><div class="value">${COP(total/servings)}</div></div>
     </div>
   `;
@@ -622,7 +632,13 @@ function renderResumen() {
     }, 0);
     const laborCost = (r.laborMinutes / 60) * state.laborRate;
     const total = ingredientCost + laborCost;
-    return { name: r.name, ingredientCost, laborCost, total, perServing: total / (r.servings || 1), perGram: r.yieldGrams > 0 ? total / r.yieldGrams : null };
+    const autoYieldGrams = items.reduce((s, it) => {
+      const ing = state.insumos.find(i => i.id === it.ingredientId);
+      if (!ing || UNIT_INFO[ing.unit].group === 'unidad') return s;
+      return s + (convertToBaseQty(ing, it.qty, it.unit) || 0);
+    }, 0);
+    const effectiveYield = r.yieldGrams > 0 ? r.yieldGrams : autoYieldGrams;
+    return { name: r.name, ingredientCost, laborCost, total, perServing: total / (r.servings || 1), perGram: effectiveYield > 0 ? total / effectiveYield : null };
   });
   const promedio = rows.length ? rows.reduce((s,r) => s + r.total, 0) / rows.length : 0;
 
