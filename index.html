@@ -397,6 +397,8 @@ function renderInsumos() {
 
 async function onInsumoSubmit(e) {
   e.preventDefault();
+  const btn = e.target.querySelector('button[type="submit"]');
+  if (btn.disabled) return;
   const name = document.getElementById('f-name').value.trim();
   const category = document.getElementById('f-category').value;
   const provider = document.getElementById('f-provider').value.trim();
@@ -409,6 +411,10 @@ async function onInsumoSubmit(e) {
   if (!name) return errEl.innerHTML = '<p class="error-text">Ponle un nombre al insumo.</p>';
   if (!qty || Number(qty) <= 0) return errEl.innerHTML = '<p class="error-text">La cantidad comprada debe ser mayor a 0.</p>';
   if (price === '' || Number(price) < 0) return errEl.innerHTML = '<p class="error-text">Ingresa el precio total pagado.</p>';
+
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '…';
 
   try {
     if (insumoEditingId) {
@@ -427,6 +433,8 @@ async function onInsumoSubmit(e) {
     render();
   } catch (err) {
     showBanner('No se pudo guardar en el Sheet: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = originalLabel;
   }
 }
 
@@ -466,13 +474,14 @@ function renderRecetas() {
     </div>
   `;
 
-  el.querySelector('#new-receta').addEventListener('click', createReceta);
+  el.querySelector('#new-receta').addEventListener('click', (e) => createReceta(e.target.closest('button')));
   el.querySelectorAll('.recetas-list button').forEach(b => b.addEventListener('click', () => { state.selectedRecetaId = b.dataset.id; renderRecetas(); }));
 
   if (selected) renderRecipeEditor(selected);
 }
 
-async function createReceta() {
+async function createReceta(btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; }
   const id = uid();
   const payload = { ID: id, NOMBRE: `Receta ${state.recetas.length + 1}`, PORCIONES: 1, MINUTOS: 0, RENDIMIENTO: 0, PASOS: '' };
   try {
@@ -481,7 +490,10 @@ async function createReceta() {
     state.selectedRecetaId = id;
     clearBanner();
     renderRecetas();
-  } catch (err) { showBanner('No se pudo crear la receta: ' + err.message); }
+  } catch (err) {
+    showBanner('No se pudo crear la receta: ' + err.message);
+    if (btn) btn.disabled = false;
+  }
 }
 
 let recetaSaveTimer = null;
@@ -578,7 +590,7 @@ function renderRecipeEditor(recipe) {
             ${recipe.steps.map((step, i) => `
               <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-family:'Playfair Display',serif; font-weight:600; color:var(--accent); width:20px; text-align:right; flex-shrink:0;">${i + 1}.</span>
-                <input class="step-text" data-index="${i}" value="${esc(step)}" style="flex:1; border:1px solid var(--input-border); border-radius:6px; padding:7px 9px; font-size:13.5px; font-family:inherit; background:var(--input-bg); color:var(--ink);" />
+                <input class="step-text" data-index="${i}" value="${esc(step)}" style="flex:1; border:1px solid var(--input-border); border-radius:6px; padding:7px 9px; font-family:inherit; background:var(--input-bg); color:var(--ink);" />
                 <button class="icon-btn move-step" data-index="${i}" data-dir="-1" title="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
                 <button class="icon-btn move-step" data-index="${i}" data-dir="1" title="Bajar" ${i === recipe.steps.length - 1 ? 'disabled' : ''}>▼</button>
                 <button class="icon-btn danger delete-step" data-index="${i}" title="Quitar">🗑</button>
@@ -648,7 +660,12 @@ function renderRecipeEditor(recipe) {
     });
   });
   host.querySelector('#r-delete').addEventListener('click', () => deleteReceta(recipe.id));
-  host.querySelector('#line-form').addEventListener('submit', (e) => { e.preventDefault(); addLine(recipe, ingSelect.value, host.querySelector('#l-qty').value, unitSelect.value); });
+  host.querySelector('#line-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn.disabled) return;
+    addLine(recipe, ingSelect.value, host.querySelector('#l-qty').value, unitSelect.value, btn);
+  });
   host.querySelectorAll('.delete-line').forEach(b => b.addEventListener('click', () => deleteLine(b.dataset.id, recipe)));
 }
 
@@ -658,7 +675,7 @@ function refreshMetricsSoon(recipe) {
   metricsTimer = setTimeout(() => renderRecipeEditor(recipe), 300);
 }
 
-async function addLine(recipe, ingredientId, qty, unit) {
+async function addLine(recipe, ingredientId, qty, unit, btn) {
   const errEl = document.getElementById('line-error');
   errEl.innerHTML = '';
   if (!ingredientId) return errEl.innerHTML = '<p class="error-text">Elige un insumo.</p>';
@@ -667,6 +684,7 @@ async function addLine(recipe, ingredientId, qty, unit) {
   if (ing && convertToBaseQty(ing, Number(qty), unit) === null) {
     return errEl.innerHTML = `<p class="error-text">"${esc(ing.name)}" se compra por unidad — solo puedes usarlo en la receta en unidades, no en peso ni volumen.</p>`;
   }
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const id = uid();
   const payload = { ID: id, RECETAID: recipe.id, INGREDIENTEID: ingredientId, CANTIDAD: Number(qty), UNIDAD: unit };
   try {
@@ -674,7 +692,10 @@ async function addLine(recipe, ingredientId, qty, unit) {
     state.recetaItems.push(normalizeItem(payload));
     clearBanner();
     renderRecipeEditor(recipe);
-  } catch (err) { showBanner('No se pudo agregar el ingrediente: ' + err.message); }
+  } catch (err) {
+    showBanner('No se pudo agregar el ingrediente: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = '+'; }
+  }
 }
 
 async function deleteLine(id, recipe) {
