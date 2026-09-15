@@ -267,7 +267,7 @@ function normalizeReceta(r) {
   return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0, yieldGrams: Number(r.RENDIMIENTO) || 0, steps: stepsRaw ? String(stepsRaw).split('\n').filter(s => s.trim() !== '') : [] };
 }
 function normalizeItem(r) {
-  return { id: String(r.ID), recetaId: String(r.RECETAID), ingredientId: String(r.INGREDIENTEID), qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g' };
+  return { id: String(r.ID), recetaId: String(r.RECETAID), ingredientId: String(r.INGREDIENTEID), qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g', sourceType: r.TIPO === 'receta' ? 'receta' : 'insumo' };
 }
 
 function unitCostOf(ing) {
@@ -287,6 +287,49 @@ function convertToBaseQty(ing, qty, unit) {
     return usedInfo.group === ingGroup ? qty * usedInfo.factor : null;
   }
   return qty * usedInfo.factor;
+}
+
+// Cost of one recipe line: either a regular insumo, or another recipe used as an ingredient
+// (costed by that recipe's own cost-per-gram). `visited` guards against circular references
+// (a recipe using itself, directly or through another recipe).
+function itemCost(item, visited) {
+  if (item.sourceType === 'receta') {
+    const sub = computeRecipeTotals(item.ingredientId, visited);
+    return sub.costPerGram * (item.qty * UNIT_INFO[item.unit].factor);
+  }
+  const ing = state.insumos.find(i => i.id === item.ingredientId);
+  if (!ing) return 0;
+  const baseQty = convertToBaseQty(ing, item.qty, item.unit);
+  return baseQty === null ? 0 : unitCostOf(ing) * baseQty;
+}
+
+// Grams (or ml/l/kg, treated 1:1) this line contributes to a recipe's automatic yield.
+// "unidad"-based insumos don't have a weight equivalent, so they're excluded.
+function itemYieldGrams(item) {
+  if (item.sourceType === 'receta') return item.qty * UNIT_INFO[item.unit].factor;
+  const ing = state.insumos.find(i => i.id === item.ingredientId);
+  if (!ing || UNIT_INFO[ing.unit].group === 'unidad') return 0;
+  return convertToBaseQty(ing, item.qty, item.unit) || 0;
+}
+
+// Full cost breakdown for a recipe, recursing into any sub-recipes used as ingredients.
+function computeRecipeTotals(recipeId, visited = new Set()) {
+  if (visited.has(recipeId)) return { ingredientCost: 0, laborCost: 0, total: 0, effectiveYield: 0, costPerGram: 0 };
+  const nextVisited = new Set(visited);
+  nextVisited.add(recipeId);
+  const r = state.recetas.find(x => x.id === recipeId);
+  if (!r) return { ingredientCost: 0, laborCost: 0, total: 0, effectiveYield: 0, costPerGram: 0 };
+  const items = state.recetaItems.filter(it => it.recetaId === recipeId);
+  let ingredientCost = 0, autoYield = 0;
+  items.forEach(it => {
+    ingredientCost += itemCost(it, nextVisited);
+    autoYield += itemYieldGrams(it);
+  });
+  const laborCost = (r.laborMinutes / 60) * state.laborRate;
+  const total = ingredientCost + laborCost;
+  const effectiveYield = r.yieldGrams > 0 ? r.yieldGrams : autoYield;
+  const costPerGram = effectiveYield > 0 ? total / effectiveYield : 0;
+  return { ingredientCost, laborCost, total, effectiveYield, costPerGram };
 }
 
 /* ---------------- NAV ---------------- */
@@ -312,7 +355,7 @@ let insumoEditingId = null;
 
 function renderInsumos() {
   const el = document.getElementById('tab-insumos');
-  const usedInRecipes = (id) => state.recetaItems.some(it => it.ingredientId === id);
+  const usedInRecipes = (id) => state.recetaItems.some(it => it.sourceType === 'insumo' && it.ingredientId === id);
   const cats = CATEGORIES.filter(c => state.insumos.some(i => (i.category || 'Otros') === c));
 
   el.innerHTML = `
@@ -511,36 +554,25 @@ function renderRecipeEditor(recipe) {
   const host = document.getElementById('recipe-editor');
   const items = state.recetaItems.filter(it => it.recetaId === recipe.id);
   const cats = CATEGORIES.filter(c => state.insumos.some(i => (i.category||'Otros') === c));
-  const lineUnits = (ingId) => {
-    const ing = state.insumos.find(i => i.id === ingId);
+  const otherRecetas = state.recetas.filter(r => r.id !== recipe.id);
+  const lineUnits = (sourceType, refId) => {
+    if (sourceType === 'receta') return ['g', 'kg', 'ml', 'l'];
+    const ing = state.insumos.find(i => i.id === refId);
     if (!ing) return ['g'];
     const group = UNIT_INFO[ing.unit].group;
     return group === 'unidad' ? ['unidad'] : ['g', 'kg', 'ml', 'l'];
   };
 
-  const lineCost = (item) => {
-    const ing = state.insumos.find(i => i.id === item.ingredientId);
-    if (!ing) return 0;
-    const baseQty = convertToBaseQty(ing, item.qty, item.unit);
-    if (baseQty === null) return 0;
-    return unitCostOf(ing) * baseQty;
-  };
-  const ingredientCost = items.reduce((s, it) => s + lineCost(it), 0);
-  const autoYieldGrams = items.reduce((s, it) => {
-    const ing = state.insumos.find(i => i.id === it.ingredientId);
-    if (!ing || UNIT_INFO[ing.unit].group === 'unidad') return s;
-    return s + (convertToBaseQty(ing, it.qty, it.unit) || 0);
-  }, 0);
-  const effectiveYield = recipe.yieldGrams > 0 ? recipe.yieldGrams : autoYieldGrams;
-  const laborCost = (recipe.laborMinutes / 60) * state.laborRate;
-  const total = ingredientCost + laborCost;
+  const totals = computeRecipeTotals(recipe.id);
+  const { ingredientCost, laborCost, total, effectiveYield } = totals;
+  const autoYieldGrams = items.reduce((s, it) => s + itemYieldGrams(it), 0);
   const servings = recipe.servings || 1;
 
   host.innerHTML = `
     <div class="recipe-title-row">
       <input class="title" id="r-name" value="${esc(recipe.name)}" />
       <button class="icon-btn" id="r-duplicate" title="Duplicar receta">⧉</button>
-      <button class="icon-btn danger" id="r-delete" title="Eliminar receta">🗑</button>
+      <button class="icon-btn danger" id="r-delete" title="${state.recetaItems.some(it => it.sourceType === 'receta' && it.ingredientId === recipe.id) ? 'No se puede eliminar: está usada como ingrediente en otra receta' : 'Eliminar receta'}" ${state.recetaItems.some(it => it.sourceType === 'receta' && it.ingredientId === recipe.id) ? 'disabled' : ''}>🗑</button>
     </div>
     <div class="recipe-meta">
       <div class="field">
@@ -556,9 +588,10 @@ function renderRecipeEditor(recipe) {
       <div class="card-head"><h2 class="serif">Ingredientes de la receta</h2></div>
       <div class="card-body compact">
         <form id="line-form" class="grid-line">
-          <div class="field"><label>Insumo</label>
+          <div class="field"><label>Insumo o receta base</label>
             <select id="l-ingredient">
-              ${cats.map(cat => `<optgroup label="${cat}">${state.insumos.filter(i => (i.category||'Otros')===cat).map(i => `<option value="${i.id}">${esc(i.name)}</option>`).join('')}</optgroup>`).join('')}
+              ${cats.map(cat => `<optgroup label="${cat}">${state.insumos.filter(i => (i.category||'Otros')===cat).map(i => `<option value="insumo|${i.id}">${esc(i.name)}</option>`).join('')}</optgroup>`).join('')}
+              ${otherRecetas.length > 0 ? `<optgroup label="Recetas base">${otherRecetas.map(r => `<option value="receta|${r.id}">${esc(r.name)}</option>`).join('')}</optgroup>` : ''}
             </select>
           </div>
           <div class="field"><label>Cantidad usada</label><input id="l-qty" type="number" min="0" step="any" placeholder="20" /></div>
@@ -570,11 +603,18 @@ function renderRecipeEditor(recipe) {
           <div class="table-scroll"><table><thead><tr><th>Insumo</th><th class="right">Cantidad usada</th><th class="right">Costo</th><th class="right"></th></tr></thead>
           <tbody>
             ${items.map(it => {
-              const ing = state.insumos.find(i => i.id === it.ingredientId);
+              let label;
+              if (it.sourceType === 'receta') {
+                const src = state.recetas.find(r => r.id === it.ingredientId);
+                label = src ? `${esc(src.name)} <span style="color:var(--ink-faint); font-size:11.5px;">(receta base)</span>` : '(receta eliminada)';
+              } else {
+                const ing = state.insumos.find(i => i.id === it.ingredientId);
+                label = ing ? esc(ing.name) : '(insumo eliminado)';
+              }
               return `<tr>
-                <td>${ing ? esc(ing.name) : '(insumo eliminado)'}</td>
+                <td>${label}</td>
                 <td class="right">${it.qty} ${UNIT_INFO[it.unit].label}</td>
-                <td class="right">${COP(lineCost(it))}</td>
+                <td class="right">${COP(itemCost(it))}</td>
                 <td class="right"><button class="icon-btn danger delete-line" data-id="${it.id}" title="Quitar">🗑</button></td>
               </tr>`;
             }).join('')}
@@ -618,7 +658,8 @@ function renderRecipeEditor(recipe) {
   const ingSelect = host.querySelector('#l-ingredient');
   const unitSelect = host.querySelector('#l-unit');
   function refreshUnits() {
-    const units = lineUnits(ingSelect.value);
+    const [type, refId] = ingSelect.value.split('|');
+    const units = lineUnits(type, refId);
     unitSelect.innerHTML = units.map(u => `<option value="${u}">${UNIT_INFO[u].label}</option>`).join('');
   }
   ingSelect.addEventListener('change', refreshUnits);
@@ -666,7 +707,8 @@ function renderRecipeEditor(recipe) {
     e.preventDefault();
     const btn = e.target.querySelector('button[type="submit"]');
     if (btn.disabled) return;
-    addLine(recipe, ingSelect.value, host.querySelector('#l-qty').value, unitSelect.value, btn);
+    const [type, refId] = ingSelect.value.split('|');
+    addLine(recipe, type, refId, host.querySelector('#l-qty').value, unitSelect.value, btn);
   });
   host.querySelectorAll('.delete-line').forEach(b => b.addEventListener('click', () => deleteLine(b.dataset.id, recipe)));
 }
@@ -677,18 +719,20 @@ function refreshMetricsSoon(recipe) {
   metricsTimer = setTimeout(() => renderRecipeEditor(recipe), 300);
 }
 
-async function addLine(recipe, ingredientId, qty, unit, btn) {
+async function addLine(recipe, sourceType, refId, qty, unit, btn) {
   const errEl = document.getElementById('line-error');
   errEl.innerHTML = '';
-  if (!ingredientId) return errEl.innerHTML = '<p class="error-text">Elige un insumo.</p>';
+  if (!refId) return errEl.innerHTML = '<p class="error-text">Elige un insumo o receta.</p>';
   if (!qty || Number(qty) <= 0) return errEl.innerHTML = '<p class="error-text">La cantidad usada debe ser mayor a 0.</p>';
-  const ing = state.insumos.find(i => i.id === ingredientId);
-  if (ing && convertToBaseQty(ing, Number(qty), unit) === null) {
-    return errEl.innerHTML = `<p class="error-text">"${esc(ing.name)}" se compra por unidad — solo puedes usarlo en la receta en unidades, no en peso ni volumen.</p>`;
+  if (sourceType === 'insumo') {
+    const ing = state.insumos.find(i => i.id === refId);
+    if (ing && convertToBaseQty(ing, Number(qty), unit) === null) {
+      return errEl.innerHTML = `<p class="error-text">"${esc(ing.name)}" se compra por unidad — solo puedes usarlo en la receta en unidades, no en peso ni volumen.</p>`;
+    }
   }
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const id = uid();
-  const payload = { ID: id, RECETAID: recipe.id, INGREDIENTEID: ingredientId, CANTIDAD: Number(qty), UNIDAD: unit };
+  const payload = { ID: id, RECETAID: recipe.id, INGREDIENTEID: refId, CANTIDAD: Number(qty), UNIDAD: unit, TIPO: sourceType };
   try {
     await apiPost('addRecetaItem', payload);
     state.recetaItems.push(normalizeItem(payload));
@@ -730,7 +774,7 @@ async function duplicateReceta(recipe, btn) {
 
     const originalItems = state.recetaItems.filter(it => it.recetaId === recipe.id);
     for (const it of originalItems) {
-      const newItemPayload = { ID: uid(), RECETAID: newId, INGREDIENTEID: it.ingredientId, CANTIDAD: it.qty, UNIDAD: it.unit };
+      const newItemPayload = { ID: uid(), RECETAID: newId, INGREDIENTEID: it.ingredientId, CANTIDAD: it.qty, UNIDAD: it.unit, TIPO: it.sourceType };
       await apiPost('addRecetaItem', newItemPayload);
       state.recetaItems.push(normalizeItem(newItemPayload));
     }
@@ -749,21 +793,8 @@ async function duplicateReceta(recipe, btn) {
 function renderResumen() {
   const el = document.getElementById('tab-resumen');
   const rows = state.recetas.map(r => {
-    const items = state.recetaItems.filter(it => it.recetaId === r.id);
-    const ingredientCost = items.reduce((s, it) => {
-      const ing = state.insumos.find(i => i.id === it.ingredientId);
-      if (!ing) return s;
-      return s + unitCostOf(ing) * (convertToBaseQty(ing, it.qty, it.unit) || 0);
-    }, 0);
-    const laborCost = (r.laborMinutes / 60) * state.laborRate;
-    const total = ingredientCost + laborCost;
-    const autoYieldGrams = items.reduce((s, it) => {
-      const ing = state.insumos.find(i => i.id === it.ingredientId);
-      if (!ing || UNIT_INFO[ing.unit].group === 'unidad') return s;
-      return s + (convertToBaseQty(ing, it.qty, it.unit) || 0);
-    }, 0);
-    const effectiveYield = r.yieldGrams > 0 ? r.yieldGrams : autoYieldGrams;
-    return { name: r.name, ingredientCost, laborCost, total, perServing: total / (r.servings || 1), perGram: effectiveYield > 0 ? total / effectiveYield : null };
+    const t = computeRecipeTotals(r.id);
+    return { name: r.name, ingredientCost: t.ingredientCost, laborCost: t.laborCost, total: t.total, perServing: t.total / (r.servings || 1), perGram: t.effectiveYield > 0 ? t.costPerGram : null };
   });
   const promedio = rows.length ? rows.reduce((s,r) => s + r.total, 0) / rows.length : 0;
 
