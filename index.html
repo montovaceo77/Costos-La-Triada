@@ -494,6 +494,10 @@ async function deleteInsumo(id) {
 
 /* ---------------- RECETAS TAB ---------------- */
 
+function sortedRecetas(list) {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+}
+
 function renderRecetas() {
   const el = document.getElementById('tab-recetas');
   if (state.insumos.length === 0) {
@@ -508,7 +512,7 @@ function renderRecetas() {
         <div class="recetas-list-head"><span>Recetas</span><button class="btn btn-ghost" id="new-receta" style="padding:4px 8px">+</button></div>
         <div class="recetas-list">
           ${state.recetas.length === 0 ? '<p style="font-size:13px;color:var(--ink-soft)">Crea tu primera receta.</p>' :
-            state.recetas.map(r => `<button class="${r.id === state.selectedRecetaId ? 'active' : ''}" data-id="${r.id}">${esc(r.name)}</button>`).join('')}
+            sortedRecetas(state.recetas).map(r => `<button class="${r.id === state.selectedRecetaId ? 'active' : ''}" data-id="${r.id}">${esc(r.name)}</button>`).join('')}
         </div>
       </div>
       <div id="recipe-editor">
@@ -554,7 +558,7 @@ function renderRecipeEditor(recipe) {
   const host = document.getElementById('recipe-editor');
   const items = state.recetaItems.filter(it => it.recetaId === recipe.id);
   const cats = CATEGORIES.filter(c => state.insumos.some(i => (i.category||'Otros') === c));
-  const otherRecetas = state.recetas.filter(r => r.id !== recipe.id);
+  const otherRecetas = sortedRecetas(state.recetas.filter(r => r.id !== recipe.id));
   const lineUnits = (sourceType, refId) => {
     if (sourceType === 'receta') return ['g', 'kg', 'ml', 'l'];
     const ing = state.insumos.find(i => i.id === refId);
@@ -792,7 +796,7 @@ async function duplicateReceta(recipe, btn) {
 
 function renderResumen() {
   const el = document.getElementById('tab-resumen');
-  const rows = state.recetas.map(r => {
+  const rows = sortedRecetas(state.recetas).map(r => {
     const t = computeRecipeTotals(r.id);
     return { name: r.name, ingredientCost: t.ingredientCost, laborCost: t.laborCost, total: t.total, perServing: t.total / (r.servings || 1), perGram: t.effectiveYield > 0 ? t.costPerGram : null };
   });
