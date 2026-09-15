@@ -86,7 +86,8 @@
   .icon-btn.danger { color: var(--accent); }
   .icon-btn:disabled { color: #C9C3B5; cursor: not-allowed; }
   .error-text { color: var(--accent); font-size: 13px; margin-top: 8px; }
-  table { width: 100%; border-collapse: collapse; }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; min-width: 480px; }
   th { text-align: left; font-size: 11.5px; font-weight: 500; color: var(--ink-faint); padding: 10px 16px; border-bottom: 1px solid var(--border-soft); }
   th.right, td.right { text-align: right; }
   td { font-size: 13.5px; padding: 10px 16px; border-bottom: 1px solid #F4F0E5; }
@@ -124,6 +125,35 @@
   form.grid-line { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; margin-bottom: 12px; }
   .actions { display: flex; gap: 6px; justify-content: flex-end; }
   .loading { padding: 3rem 1rem; text-align: center; color: var(--ink-soft); }
+  /* ---- Mobile ---- */
+  @media (max-width: 680px) {
+    header .wrap { padding: 1.25rem 1rem 1rem; }
+    header img { height: 56px; }
+    header p { font-size: 13px; }
+    nav .wrap { padding: 0 0.75rem; gap: 0; overflow-x: auto; }
+    nav button { padding: 10px 10px; font-size: 13.5px; white-space: nowrap; }
+    main { padding: 1rem 0.75rem 3rem; }
+    .card-head, .card-body, .card-body.compact { padding: 12px; }
+    .field label { font-size: 12.5px; }
+    input, select, .btn { font-size: 16px; } /* 16px avoids iOS auto-zoom on focus */
+    .btn { padding: 10px 14px; }
+    .icon-btn { padding: 8px; }
+    form.grid-row, form.grid-row2, form.grid-line { grid-template-columns: 1fr; }
+    form.grid-row2 .actions, form.grid-line button[type="submit"] { width: 100%; }
+    .actions { justify-content: stretch; }
+    .actions .btn { flex: 1; }
+    .recetas-layout { grid-template-columns: 1fr; }
+    .recetas-list { flex-direction: row; flex-wrap: wrap; }
+    .recetas-list button { flex: 0 0 auto; }
+    .recipe-meta { flex-direction: column; gap: 12px; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .metric .value { font-size: 17px; }
+    th, td { padding: 9px 10px; font-size: 12.5px; }
+    table { min-width: 420px; }
+    .recipe-title-row input.title { font-size: 18px; }
+    #steps-list > div { flex-wrap: wrap; }
+    #steps-list .step-text { flex-basis: 100%; order: 3; }
+  }
 </style>
 </head>
 <body>
@@ -316,7 +346,7 @@ function renderInsumos() {
     <div class="card">
       <div class="card-head"><h2 class="serif">Insumos comprados (${state.insumos.length})</h2></div>
       ${state.insumos.length === 0 ? '<div class="empty">Aún no registras compras. Agrega tu primer insumo arriba.</div>' : `
-        <table>
+        <div class="table-scroll"><table>
           <thead><tr><th>Insumo</th><th>Proveedor</th><th class="right">Cantidad comprada</th><th class="right">Precio total</th><th class="right">Costo por unidad</th><th class="right"></th></tr></thead>
           <tbody>
             ${cats.map(cat => `
@@ -341,7 +371,7 @@ function renderInsumos() {
               }).join('')}
             `).join('')}
           </tbody>
-        </table>
+        </table></div>
       `}
     </div>
   `;
@@ -524,7 +554,7 @@ function renderRecipeEditor(recipe) {
         </form>
         <div id="line-error"></div>
         ${items.length === 0 ? '<div class="empty small">Agrega los insumos que lleva esta receta y sus cantidades.</div>' : `
-          <table><thead><tr><th>Insumo</th><th class="right">Cantidad usada</th><th class="right">Costo</th><th class="right"></th></tr></thead>
+          <div class="table-scroll"><table><thead><tr><th>Insumo</th><th class="right">Cantidad usada</th><th class="right">Costo</th><th class="right"></th></tr></thead>
           <tbody>
             ${items.map(it => {
               const ing = state.insumos.find(i => i.id === it.ingredientId);
@@ -535,7 +565,7 @@ function renderRecipeEditor(recipe) {
                 <td class="right"><button class="icon-btn danger delete-line" data-id="${it.id}" title="Quitar">🗑</button></td>
               </tr>`;
             }).join('')}
-          </tbody></table>
+          </tbody></table></div>
         `}
       </div>
     </div>
@@ -708,7 +738,7 @@ function renderResumen() {
     <div class="card">
       <div class="card-head"><h2 class="serif">Costo por receta</h2></div>
       ${rows.length === 0 ? '<div class="empty">Crea recetas en la pestaña Recetas para verlas aquí.</div>' : `
-        <table>
+        <div class="table-scroll"><table>
           <thead><tr><th>Receta</th><th class="right">Ingredientes</th><th class="right">Mano de obra</th><th class="right">Total</th><th class="right">Por gramo</th><th class="right">Por porción</th></tr></thead>
           <tbody>${rows.map(r => `<tr>
             <td>${esc(r.name)}</td>
@@ -718,7 +748,7 @@ function renderResumen() {
             <td class="right">${r.perGram !== null ? COP2(r.perGram) : '—'}</td>
             <td class="right">${COP(r.perServing)}</td>
           </tr>`).join('')}</tbody>
-        </table>
+        </table></div>
       `}
     </div>
   `;
