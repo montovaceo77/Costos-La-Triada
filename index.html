@@ -539,6 +539,7 @@ function renderRecipeEditor(recipe) {
   host.innerHTML = `
     <div class="recipe-title-row">
       <input class="title" id="r-name" value="${esc(recipe.name)}" />
+      <button class="icon-btn" id="r-duplicate" title="Duplicar receta">⧉</button>
       <button class="icon-btn danger" id="r-delete" title="Eliminar receta">🗑</button>
     </div>
     <div class="recipe-meta">
@@ -659,6 +660,7 @@ function renderRecipeEditor(recipe) {
       renderRecipeEditor(recipe);
     });
   });
+  host.querySelector('#r-duplicate').addEventListener('click', (e) => duplicateReceta(recipe, e.target.closest('button')));
   host.querySelector('#r-delete').addEventListener('click', () => deleteReceta(recipe.id));
   host.querySelector('#line-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -716,6 +718,30 @@ async function deleteReceta(id) {
     clearBanner();
     renderRecetas();
   } catch (err) { showBanner('No se pudo eliminar la receta: ' + err.message); }
+}
+
+async function duplicateReceta(recipe, btn) {
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const newId = uid();
+    const newRecetaPayload = { ID: newId, NOMBRE: `${recipe.name} (copia)`, PORCIONES: recipe.servings, MINUTOS: recipe.laborMinutes, RENDIMIENTO: recipe.yieldGrams, PASOS: recipe.steps.join('\n') };
+    await apiPost('addReceta', newRecetaPayload);
+    state.recetas.push(normalizeReceta(newRecetaPayload));
+
+    const originalItems = state.recetaItems.filter(it => it.recetaId === recipe.id);
+    for (const it of originalItems) {
+      const newItemPayload = { ID: uid(), RECETAID: newId, INGREDIENTEID: it.ingredientId, CANTIDAD: it.qty, UNIDAD: it.unit };
+      await apiPost('addRecetaItem', newItemPayload);
+      state.recetaItems.push(normalizeItem(newItemPayload));
+    }
+
+    state.selectedRecetaId = newId;
+    clearBanner();
+    renderRecetas();
+  } catch (err) {
+    showBanner('No se pudo duplicar la receta: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = '⧉'; }
+  }
 }
 
 /* ---------------- RESUMEN TAB ---------------- */
