@@ -264,7 +264,8 @@ function normalizeInsumo(r) {
 }
 function normalizeReceta(r) {
   const stepsRaw = r.PASOS || '';
-  return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0, yieldGrams: Number(r.RENDIMIENTO) || 0, steps: stepsRaw ? String(stepsRaw).split('\n').filter(s => s.trim() !== '') : [] };
+  const favRaw = String(r.FAVORITO || '').trim().toUpperCase();
+  return { id: String(r.ID), name: r.NOMBRE || '', servings: Number(r.PORCIONES) || 1, laborMinutes: Number(r.MINUTOS) || 0, yieldGrams: Number(r.RENDIMIENTO) || 0, steps: stepsRaw ? String(stepsRaw).split('\n').filter(s => s.trim() !== '') : [], favorite: favRaw === 'TRUE' || favRaw === '1' };
 }
 function normalizeItem(r) {
   return { id: String(r.ID), recetaId: String(r.RECETAID), ingredientId: String(r.INGREDIENTEID), qty: Number(r.CANTIDAD) || 0, unit: r.UNIDAD || 'g', sourceType: r.TIPO === 'receta' ? 'receta' : 'insumo' };
@@ -495,7 +496,10 @@ async function deleteInsumo(id) {
 /* ---------------- RECETAS TAB ---------------- */
 
 function sortedRecetas(list) {
-  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+  return [...list].sort((a, b) => {
+    if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1;
+    return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+  });
 }
 
 function renderRecetas() {
@@ -512,7 +516,12 @@ function renderRecetas() {
         <div class="recetas-list-head"><span>Recetas</span><button class="btn btn-ghost" id="new-receta" style="padding:4px 8px">+</button></div>
         <div class="recetas-list">
           ${state.recetas.length === 0 ? '<p style="font-size:13px;color:var(--ink-soft)">Crea tu primera receta.</p>' :
-            sortedRecetas(state.recetas).map(r => `<button class="${r.id === state.selectedRecetaId ? 'active' : ''}" data-id="${r.id}">${esc(r.name)}</button>`).join('')}
+            sortedRecetas(state.recetas).map(r => `
+              <div class="receta-row ${r.id === state.selectedRecetaId ? 'active' : ''}" data-id="${r.id}" style="display:flex;align-items:center;gap:4px">
+                <button class="star-toggle" data-fav-id="${r.id}" title="${r.favorite ? 'Quitar de favoritas' : 'Marcar como favorita'}" style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;padding:2px;color:${r.favorite ? 'var(--accent)' : 'var(--ink-soft)'}">${r.favorite ? '★' : '☆'}</button>
+                <button class="${r.id === state.selectedRecetaId ? 'active' : ''}" data-id="${r.id}" style="flex:1;text-align:left">${esc(r.name)}</button>
+              </div>
+            `).join('')}
         </div>
       </div>
       <div id="recipe-editor">
@@ -522,7 +531,8 @@ function renderRecetas() {
   `;
 
   el.querySelector('#new-receta').addEventListener('click', (e) => createReceta(e.target.closest('button')));
-  el.querySelectorAll('.recetas-list button').forEach(b => b.addEventListener('click', () => { state.selectedRecetaId = b.dataset.id; renderRecetas(); }));
+  el.querySelectorAll('.recetas-list button[data-id]').forEach(b => b.addEventListener('click', () => { state.selectedRecetaId = b.dataset.id; renderRecetas(); }));
+  el.querySelectorAll('.recetas-list .star-toggle').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); toggleFavorite(b.dataset.favId); }));
 
   if (selected) renderRecipeEditor(selected);
 }
@@ -530,7 +540,7 @@ function renderRecetas() {
 async function createReceta(btn) {
   if (btn) { if (btn.disabled) return; btn.disabled = true; }
   const id = uid();
-  const payload = { ID: id, NOMBRE: `Receta ${state.recetas.length + 1}`, PORCIONES: 1, MINUTOS: 0, RENDIMIENTO: 0, PASOS: '' };
+  const payload = { ID: id, NOMBRE: `Receta ${state.recetas.length + 1}`, PORCIONES: 1, MINUTOS: 0, RENDIMIENTO: 0, PASOS: '', FAVORITO: 'FALSE' };
   try {
     await apiPost('addReceta', payload);
     state.recetas.push(normalizeReceta(payload));
@@ -548,10 +558,25 @@ function scheduleRecetaSave(receta) {
   clearTimeout(recetaSaveTimer);
   recetaSaveTimer = setTimeout(async () => {
     try {
-      await apiPost('updateReceta', { ID: receta.id, NOMBRE: receta.name, PORCIONES: receta.servings, MINUTOS: receta.laborMinutes, RENDIMIENTO: receta.yieldGrams, PASOS: receta.steps.join('\n') });
+      await apiPost('updateReceta', { ID: receta.id, NOMBRE: receta.name, PORCIONES: receta.servings, MINUTOS: receta.laborMinutes, RENDIMIENTO: receta.yieldGrams, PASOS: receta.steps.join('\n'), FAVORITO: receta.favorite ? 'TRUE' : 'FALSE' });
       clearBanner();
     } catch (err) { showBanner('No se pudo guardar la receta: ' + err.message); }
   }, 500);
+}
+
+async function toggleFavorite(id) {
+  const receta = state.recetas.find(r => r.id === id);
+  if (!receta) return;
+  receta.favorite = !receta.favorite;
+  renderRecetas();
+  try {
+    await apiPost('updateReceta', { ID: receta.id, NOMBRE: receta.name, PORCIONES: receta.servings, MINUTOS: receta.laborMinutes, RENDIMIENTO: receta.yieldGrams, PASOS: receta.steps.join('\n'), FAVORITO: receta.favorite ? 'TRUE' : 'FALSE' });
+    clearBanner();
+  } catch (err) {
+    receta.favorite = !receta.favorite;
+    showBanner('No se pudo guardar la favorita: ' + err.message);
+    renderRecetas();
+  }
 }
 
 function renderRecipeEditor(recipe) {
@@ -574,6 +599,7 @@ function renderRecipeEditor(recipe) {
 
   host.innerHTML = `
     <div class="recipe-title-row">
+      <button class="icon-btn" id="r-favorite" title="${recipe.favorite ? 'Quitar de favoritas' : 'Marcar como favorita'}" style="color:${recipe.favorite ? 'var(--accent)' : 'var(--ink-soft)'}">${recipe.favorite ? '★' : '☆'}</button>
       <input class="title" id="r-name" value="${esc(recipe.name)}" />
       <button class="icon-btn" id="r-duplicate" title="Duplicar receta">⧉</button>
       <button class="icon-btn danger" id="r-delete" title="${state.recetaItems.some(it => it.sourceType === 'receta' && it.ingredientId === recipe.id) ? 'No se puede eliminar: está usada como ingrediente en otra receta' : 'Eliminar receta'}" ${state.recetaItems.some(it => it.sourceType === 'receta' && it.ingredientId === recipe.id) ? 'disabled' : ''}>🗑</button>
@@ -705,6 +731,7 @@ function renderRecipeEditor(recipe) {
       renderRecipeEditor(recipe);
     });
   });
+  host.querySelector('#r-favorite').addEventListener('click', () => toggleFavorite(recipe.id));
   host.querySelector('#r-duplicate').addEventListener('click', (e) => duplicateReceta(recipe, e.target.closest('button')));
   host.querySelector('#r-delete').addEventListener('click', () => deleteReceta(recipe.id));
   host.querySelector('#line-form').addEventListener('submit', (e) => {
@@ -772,7 +799,7 @@ async function duplicateReceta(recipe, btn) {
   if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = '…'; }
   try {
     const newId = uid();
-    const newRecetaPayload = { ID: newId, NOMBRE: `${recipe.name} (copia)`, PORCIONES: recipe.servings, MINUTOS: recipe.laborMinutes, RENDIMIENTO: recipe.yieldGrams, PASOS: recipe.steps.join('\n') };
+    const newRecetaPayload = { ID: newId, NOMBRE: `${recipe.name} (copia)`, PORCIONES: recipe.servings, MINUTOS: recipe.laborMinutes, RENDIMIENTO: recipe.yieldGrams, PASOS: recipe.steps.join('\n'), FAVORITO: 'FALSE' };
     await apiPost('addReceta', newRecetaPayload);
     state.recetas.push(normalizeReceta(newRecetaPayload));
 
